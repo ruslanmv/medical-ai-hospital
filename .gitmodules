@@ -1,0 +1,3 @@
+[submodule "mcp"]
+	path = mcp
+	url  = https://github.com/ruslanmv/medical-mcp-toolkit.git

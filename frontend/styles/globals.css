@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 247 247 248; /* subtle gray */
+}
+
+html, body, #__next { height: 100%; }
+body { background: rgb(var(--bg)); }
+
+/* Utility wrappers */
+.container-narrow { @apply max-w-3xl mx-auto px-4; }
+.container-wide { @apply max-w-6xl mx-auto px-4; }
