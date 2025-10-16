@@ -1,4 +1,4 @@
-import './globals.css';
+import '../styles/globals.css'; // <-- CORRECTED PATH
 import { ReactNode } from 'react';
 import Navbar from '@/components/Navbar';
 import Providers from '@/lib/providers';
