@@ -1,9 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  output: "standalone", // << allows minimal runtime image (copy .next/standalone)
   experimental: {
-    optimizeCss: true
+    typedRoutes: false,
   },
-  output: 'standalone'
 };
+
 export default nextConfig;

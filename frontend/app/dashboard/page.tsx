@@ -1,29 +1,27 @@
-'use client';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
-import Loading from '@/components/Loading';
+"use client";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Loading from "@/components/Loading";
 
 export default function DashboardPage() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => api.get('/auth/me').then(r => r.json()),
+  const { data: me, isLoading, error } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.get<any>("/auth/me"),
   });
 
   if (isLoading) return <Loading />;
+  if (error) return <div className="text-red-600">Error: {(error as Error).message}</div>;
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold mb-4">Dashboard</h1>
-      <div className="grid md:grid-cols-2 gap-4">
-        <div className="rounded-2xl bg-white p-4 shadow">
-          <h2 className="font-medium mb-2">Account</h2>
-          <p className="text-sm text-gray-600">{data?.email}</p>
-        </div>
-        <div className="rounded-2xl bg-white p-4 shadow">
-          <h2 className="font-medium mb-2">Profile completeness</h2>
-          <p className="text-sm text-gray-600">Go to Profile to finish your demographics.</p>
-        </div>
-      </div>
+    <div className="grid gap-6">
+      <h1 className="text-2xl font-semibold">Welcome{me?.email ? `, ${me.email}` : ""}</h1>
+      <Card>
+        <CardHeader><CardTitle>Profile Snapshot</CardTitle></CardHeader>
+        <CardContent>
+          <p>Your profile snapshot will appear here.</p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
