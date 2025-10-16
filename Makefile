@@ -12,18 +12,32 @@ GATEWAY_PORT  ?= 8080
 MCP_PORT      ?= 9090
 DB_PORT       ?= 5432
 
-# --- Docker Compose -----------------------------------------------------------
-COMPOSE = docker compose
+# --- Docker Compose Detection (v2 plugin vs v1 binary) -----------------------
+# Prefer 'docker compose' (v2). Fall back to 'docker-compose' (v1) when needed.
+HAVE_DOCKER_COMPOSE_V2 := $(shell docker compose version >/dev/null 2>&1 && echo 1 || echo 0)
+HAVE_DOCKER_COMPOSE_V1 := $(shell docker-compose --version >/dev/null 2>&1 && echo 1 || echo 0)
+
+ifeq ($(HAVE_DOCKER_COMPOSE_V2),1)
+  COMPOSE := docker compose
+else ifeq ($(HAVE_DOCKER_COMPOSE_V1),1)
+  COMPOSE := docker-compose
+else
+  $(error Docker Compose not found. Install Compose v2 ('docker compose') or v1 ('docker-compose'))
+endif
 
 .PHONY: help up down ps logs tail restart \
         db-up db-down db-logs db-sh dump \
         fe fe-build fe-start fe-lint \
         gw gw-lint gw-test \
         bootstrap fmt lint test \
-        seed smoke clean
+        seed smoke clean compose-version
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-20s %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
+
+compose-version: ## Show which Compose variant is being used
+	@echo "Using: $(COMPOSE)"
+	@$(COMPOSE) version || true
 
 # --- Orchestration ------------------------------------------------------------
 up: ## Start all services (DB, MCP, Gateway, Frontend)
