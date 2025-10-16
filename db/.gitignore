@@ -1,0 +1,6 @@
+# Local database dumps / scratch files
+*.sql.gz
+*.dump
+*.bak
+*.backup
+dump.sql

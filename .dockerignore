@@ -1,0 +1,38 @@
+# VCS & meta
+.git
+.github
+.gitignore
+.gitattributes
+
+# Node
+node_modules
+**/node_modules
+.next
+out
+coverage
+
+# Python
+.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache
+.ruff_cache
+
+# Local envs
+.env
+.env.*
+
+# IDE
+.vscode
+.idea
+
+# Docs & misc (keep if needed in image)
+docs
+scripts
+
+# DB dumps
+db/dump.sql
+*.sql.gz
+*.dump
