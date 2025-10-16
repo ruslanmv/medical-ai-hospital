@@ -1,19 +1,10 @@
-# Dependencies & outputs
 node_modules
 .next
-out
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Local envs
-.env*
-!./.env.local.example
-
-# VCS/IDE
+dist
 .git
-.github
+.gitignore
 .vscode
-.idea
+.env*
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
