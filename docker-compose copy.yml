@@ -1,13 +1,3 @@
-
-
-# ==============================
-# docker-compose.yml (UPDATED SNIPPET)
-# ==============================
-# Key changes:
-#  1) gateway.depends_on removed so `make gw` doesn't health-gate on db.
-#  2) Keep db ports mapping for host access, but you can override with DB_PORT=5433
-#     or remove the mapping entirely to avoid any host port conflicts.
-
 services:
   db:
     image: postgres:15
@@ -18,9 +8,10 @@ services:
       POSTGRES_PASSWORD: mcp_password
       POSTGRES_DB: medical_db
     ports:
-      - "${DB_PORT:-5432}:5432"              # change DB_PORT to avoid conflicts on host
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+      # Run schema + seed on first boot if present (alpha-order applies)
       - ./db/10_init.sql:/docker-entrypoint-initdb.d/10_init.sql:ro
       - ./db/20_seed.sql:/docker-entrypoint-initdb.d/20_seed.sql:ro
     healthcheck:
@@ -39,10 +30,11 @@ services:
       UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL:-info}
       MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-INFO}
     ports:
-      - "${MCP_PORT:-9090}:8080"
+      - "${MCP_PORT:-9090}:8080"    # host:container (MCP listens on 8080 internally)
     depends_on:
       db:
         condition: service_healthy
+    # If this image lacks curl, remove/adjust healthcheck or keep depends_on: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
@@ -69,7 +61,11 @@ services:
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-dev-token}
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
-    # IMPORTANT: no depends_on here to avoid health gating; `make gw` uses --no-deps.
+    depends_on:
+      db:
+        condition: service_healthy
+      mcp:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s

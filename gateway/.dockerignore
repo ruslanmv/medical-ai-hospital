@@ -1,22 +1,10 @@
-# Python caches & venv
-.venv
-__pycache__
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
-.pytest_cache
-.ruff_cache
-.coverage*
-
-# Local envs
-.env*
-!./.env.example
-
-# VCS/IDE
+*.log
+.env
+.venv
 .git
-.github
-.vscode
-.idea
-
-# (Optional) Exclude tests for slimmer prod images
-# tests/
+.gitignore
+Dockerfile*
