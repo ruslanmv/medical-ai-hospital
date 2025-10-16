@@ -1,4 +1,4 @@
-version: '3.9'
+version: "3.9"
 
 services:
   db:
@@ -13,7 +13,9 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./db/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      # Run both schema and seed on first boot (alpha-order applies)
+      - ./db/10_init.sql:/docker-entrypoint-initdb.d/10_init.sql:ro
+      - ./db/20_seed.sql:/docker-entrypoint-initdb.d/20_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mcp_user -d medical_db"]
       interval: 5s
@@ -21,16 +23,28 @@ services:
       retries: 30
 
   mcp:
-    image: ghcr.io/your-org/medical-mcp-toolkit:latest # replace with real image or build context
+    image: ghcr.io/ruslanmv/medical-mcp-toolkit:latest
     container_name: mcp
     restart: unless-stopped
     environment:
-      MCP_BEARER_TOKEN: dev-token
+      # The server reads BEARER_TOKEN
+      BEARER_TOKEN: ${MCP_BEARER_TOKEN:-dev-token}
+      # Useful if/when the app connects to Postgres directly
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mcp_user:mcp_password@db:5432/medical_db}
+      UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL:-info}
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-INFO}
     ports:
-      - "${MCP_PORT:-9090}:9090"
+      # host:container | container listens on 8080 per your Dockerfile
+      - "${MCP_PORT:-9090}:8080"
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
 
   gateway:
     build:
@@ -46,15 +60,16 @@ services:
       SESSION_SECURE_COOKIES: "false"
       SESSION_SAMESITE: lax
       COOKIE_SECRET: change-me-please-32B-minimum
-      MCP_BASE_URL: http://mcp:9090
-      MCP_BEARER_TOKEN: dev-token
+      # Point to MCP internal port (8080)
+      MCP_BASE_URL: http://mcp:8080
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-dev-token}
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
     depends_on:
       db:
         condition: service_healthy
       mcp:
-        condition: service_started
+        condition: service_healthy
 
   frontend:
     build:
