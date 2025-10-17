@@ -1,7 +1,6 @@
-import base64
-import os
-import hashlib
-import datetime as dt
+from __future__ import annotations
+
+import base64, os, hashlib, datetime as dt
 from fastapi import Request, Response
 from itsdangerous import TimestampSigner, BadSignature
 from pydantic import BaseModel
@@ -15,25 +14,27 @@ from ..repos.users import (
 signer = TimestampSigner(settings.cookie_secret)
 
 class Session(BaseModel):
-    session_id: int
+    session_id: str
     user_id: str
     expires_at: dt.datetime
-
 
 def _make_token() -> str:
     return base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
 
-
 def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-
-async def create_session(user_id: str, response: Response) -> Session:
+async def create_session(user_id: str, request: Request, response: Response) -> Session:
     token = _make_token()
     token_signed = signer.sign(token).decode()
     expires = dt.datetime.utcnow() + dt.timedelta(seconds=settings.session_ttl_seconds)
     token_hash = _hash_token(token)
-    sess = await insert_session(user_id, token_hash, expires)
+
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
+
+    row = await insert_session(user_id=user_id, token_hash=token_hash, expires_at=expires, ip_address=ip, user_agent=ua)
+
     response.set_cookie(
         settings.session_cookie_name,
         token_signed,
@@ -43,8 +44,7 @@ async def create_session(user_id: str, response: Response) -> Session:
         samesite=settings.session_samesite,
         path="/",
     )
-    return Session(session_id=sess["id"], user_id=user_id, expires_at=expires)
-
+    return Session(session_id=row["id"], user_id=row["user_id"], expires_at=row["expires_at"])
 
 async def read_session(request: Request) -> Session | None:
     raw = request.cookies.get(settings.session_cookie_name)
@@ -60,8 +60,7 @@ async def read_session(request: Request) -> Session | None:
         return None
     return Session(session_id=row["id"], user_id=row["user_id"], expires_at=row["expires_at"])
 
-
-async def revoke_session(request: Request, response: Response | None = None):
+async def revoke_session(request: Request, response: Response | None = None) -> None:
     raw = request.cookies.get(settings.session_cookie_name)
     if raw:
         try:

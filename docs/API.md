@@ -1,27 +1,245 @@
-# Gateway API — Summary
+# Gateway API — Production Guide
 
-Base URL: `http://localhost:8080`
+**Base URL (local):** `http://localhost:8080`  
+**OpenAPI UI:** `http://localhost:8080/docs` (if enabled)
 
-## Auth
-- `POST /auth/register` — `{ email, password }`
-- `POST /auth/login` — sets HttpOnly cookie if success
-- `POST /auth/logout` — clears session cookie
-- `GET /auth/me` — returns `{ id, email, is_verified }`
+This document describes the public HTTP API exposed by the **Gateway (FastAPI)** that fronts the **PostgreSQL** database and the **MCP** AI server. The API is designed for a browser SPA (Next.js) and server-to-server callers.
 
-## Me / Patient
-- `GET /me/patient` — profile snapshot or `null` if not linked
-- `PUT /me/patient` — updates demographics (whitelisted fields)
+---
 
-## Chat
-- `POST /chat/send` — `{ message?, args? }` → forwards to MCP tool
-- `GET /chat/events` — SSE stream proxied from MCP
+## Authentication & Sessions
 
-## Error Model
-- Errors return JSON `{ detail: string }` and appropriate HTTP status.
+**Session type:** Cookie-based session  
+**Cookie name:** `sid` (configurable)  
+**Default TTL:** `SESSION_TTL_SECONDS` (e.g., 30 days)  
+**Cookie flags (recommended prod):** `HttpOnly; Secure; SameSite=Strict`
 
-## Auth Model
-- Cookie name: `sid` (configurable)
-- Cookies are HttpOnly; frontend must send `credentials: 'include'`.
+The frontend **must** send credentials with each request:
+```ts
+fetch("/auth/me", { credentials: "include" })
+```
+For local development over plain HTTP, set:
+```
+SESSION_SECURE_COOKIES=false
+SESSION_SAMESITE=lax
+```
+### CORS
+
+Allow the SPA origin via environment variables:
+```
+ALLOWED_ORIGINS=http://localhost:3000
+ALLOW_CREDENTIALS=true
+```
+### Error Model
+Errors return a JSON payload with a human-readable detail and an HTTP status:
+
+```json
+{ "detail": "Meaningful error message" }
+```
+Examples:
+
+- **400 Bad Request** — invalid payload
+- **401 Unauthorized** — no/invalid session cookie
+- **403 Forbidden** — authenticated but not allowed
+- **404 Not Found** — resource does not exist
+- **422 Unprocessable Entity** — validation error
+- **500 Internal Server Error** — unexpected failure
+
+---
+
+## Endpoints
+
+### Health
+**`GET /health`** Health probe for infrastructure.
+- **Response `200`**
+  ```json
+  { "ok": true }
+  ```
+
+### Auth
+**`POST /auth/register`** Create a new account.
+- **Request**
+  ```json
+  {
+    "email": "alice@example.com",
+    "password": "Str0ng!Passw0rd"
+  }
+  ```
+- **Response `201`**
+  ```json
+  {
+    "ok": true
+  }
+  ```
+- **Errors**
+  - **400** if email already registered
+  - **422** invalid email or weak password
+- **cURL**
+  ```bash
+  curl -i -X POST http://localhost:8080/auth/register \
+    -H "Content-Type: application/json" \
+    -d '{"email":"alice@example.com","password":"Str0ng!Passw0rd"}'
+  ```
+
+**`POST /auth/login`** Authenticate and set a session cookie.
+- **Request**
+  ```json
+  {
+    "email": "alice@example.com",
+    "password": "Str0ng!Passw0rd"
+  }
+  ```
+- **Response `200`**
+  - Sets `Set-Cookie: sid=...; HttpOnly; ...`
+  ```json
+  { "ok": true }
+  ```
+- **Errors**
+  - **401** invalid credentials
+- **cURL (capture cookie)**
+  ```bash
+  curl -i -c cookies.txt -X POST http://localhost:8080/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"alice@example.com","password":"Str0ng!Passw0rd"}'
+  ```
+
+**`POST /auth/logout`** Invalidate the current session.
+- **Response `200`**
+  ```json
+  { "ok": true }
+  ```
+- **cURL**
+  ```bash
+  curl -i -b cookies.txt -X POST http://localhost:8080/auth/logout
+  ```
+
+**`GET /auth/me`** Return the current account.
+- **Response `200`**
+  ```json
+  {
+    "id": "uuid",
+    "email": "alice@example.com",
+    "is_verified": false
+  }
+  ```
+- **Errors**
+  - **401** not authenticated
+
+---
+
+### Me / Patient
+These endpoints operate on the single patient linked to the authenticated user.
+
+**`GET /me/patient`** Return a profile snapshot (merged view) or `null` if not linked.
+- **Response `200` (example)**
+  ```json
+  {
+    "patient_id": "88c7d9ff-....",
+    "mrn": "MRN-001",
+    "first_name": "Alice",
+    "last_name": "Carson",
+    "date_of_birth": "1986-09-07",
+    "sex": "female",
+    "email": "alice@example.com",
+    "phone": "+1 555-555-0100",
+    "address_line1": "100 Main St",
+    "city": "Austin",
+    "state": "TX",
+    "postal_code": "73301",
+    "country_code": "US",
+    "pregnant": false,
+    "breastfeeding": false,
+    "conditions": [
+      { "name": "Hypertension", "code": "I10", "code_system": "ICD-10", "onset_date": "2018-01-01" }
+    ],
+    "allergies": [
+      { "substance": "Penicillin", "reaction": "Rash", "severity": "moderate" }
+    ],
+    "medications": [
+      { "drug_name": "Lisinopril", "dose": "10 mg", "route": "PO", "frequency": "QD" }
+    ],
+    "latest_vitals": {
+      "timestamp_utc": "2024-04-01T12:00:00Z",
+      "systolic_mmhg": 122,
+      "diastolic_mmhg": 78,
+      "heart_rate_bpm": 68,
+      "bmi": 23.5
+    }
+  }
+  ```
+
+**`PUT /me/patient`** Update demographics (whitelisted fields).
+- **Allowed fields:** `first_name`, `last_name`, `date_of_birth`, `sex`, `email`, `phone`, `address_line1`, etc.
+- **Request**
+  ```json
+  {
+    "first_name": "Alice",
+    "last_name": "Carson",
+    "phone": "+1 555-555-0100"
+  }
+  ```
+- **Response `200`**
+  ```json
+  { "ok": true }
+  ```
+- **Errors**
+  - **401** not authenticated
+  - **404** no linked patient yet
+  - **422** invalid field values
+
+---
+
+### Chat (MCP)
+The Gateway fronts the MCP server, proxying requests and hiding MCP auth from the browser.
+
+**`POST /chat/send`** Send a message/command to the AI assistant or directly invoke an MCP tool.
+- **Request (free-form message)**
+  ```json
+  { "message": "I have chest pain and shortness of breath." }
+  ```
+- **Request (explicit tool call)**
+  ```json
+  {
+    "args": {
+      "symptoms": ["chest pain", "shortness of breath"]
+    }
+  }
+  ```
+- **Response `200` (example)**
+  ```json
+  {
+    "ok": true,
+    "tool": "triageSymptoms",
+    "result": {
+      "acuity": "URGENT",
+      "recommendation": "Seek evaluation within 2–4 hours"
+    }
+  }
+  ```
+- **Errors**
+  - **400** invalid payload
+  - **401** not authenticated
+  - **502** upstream MCP not reachable
+
+---
+### Rate Limiting & Abuse Controls (recommended)
+- Per-IP rate limit on `/auth/*` and `/chat/send`.
+- CAPTCHA on registration in public deployments.
+- WAF/IDS in front of the Gateway for production.
+
+---
+### Status Codes Summary
+
+| Endpoint          | Method | 200 | 201 | 400 | 401 | 404 | 422 |
+|-------------------|--------|:---:|:---:|:---:|:---:|:---:|:---:|
+| **/health** | GET    |  ✓  |     |     |     |     |     |
+| **/auth/register**| POST   |     |  ✓  |  ✓  |     |     |  ✓  |
+| **/auth/login** | POST   |  ✓  |     |  ✓  |  ✓  |     |     |
+| **/auth/logout** | POST   |  ✓  |     |     |  ✓  |     |     |
+| **/auth/me** | GET    |  ✓  |     |     |  ✓  |     |     |
+| **/me/patient** | GET    |  ✓  |     |     |  ✓  |  ✓  |     |
+| **/me/patient** | PUT    |  ✓  |     |     |  ✓  |  ✓  |  ✓  |
+| **/chat/send** | POST   |  ✓  |     |  ✓  |  ✓  |     |     |
 
 
 ## Architecture

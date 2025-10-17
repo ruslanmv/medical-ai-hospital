@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 from fastapi import Depends, HTTPException, Request, status
-from .db import pool
+from . import db  # Import the module itself
 from .auth.sessions import read_session
 from .repos.users import get_user_by_id
 
-# Yield a cursor within a transaction; commits on success, rollbacks on exception
 async def get_conn():
-    async with pool.connection() as conn:
-        async with conn.transaction():
-            async with conn.cursor() as cur:
-                yield cur
+    # Access the 'pool' variable through the module namespace
+    if not db.pool:
+        raise RuntimeError("DB pool not initialized")
+    async with db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            yield cur
 
 async def get_current_session(request: Request):
     session = await read_session(request)

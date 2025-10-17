@@ -1,38 +1,30 @@
 #!/usr/bin/env bash
+# scripts/db_schema_check.sh
 # ==============================================================================
-# medical-mcp-toolkit — DB Schema Inspector (Dockerized Postgres)
-#
+# DB Schema Inspector (Dockerized Postgres)
 # Prints: server info, extensions, schemas, tables, views, enums, and for each
-# expected table: columns, indexes, constraints, storage size, and row estimates.
+# expected table: columns, indexes, constraints, storage size, and row counts.
 #
-# Defaults align with Dockerfile.db / Makefile in this repo.
-#
-# Usage:
-#   scripts/db_schema_check.sh [--container NAME] [--user USER] [--db DB]
-#                              [--schema SCHEMA] [--tables "t1 t2 ..."]
-#                              [--exact] [--quiet]
-#
-# Examples:
-#   scripts/db_schema_check.sh
-#   scripts/db_schema_check.sh --schema public --tables "patients vitals"
-#   DB_CONTAINER_NAME=medical-db-container scripts/db_schema_check.sh --exact
-#
-# Exit codes:
-#   0 success, non-zero on error.
+# MODIFIED: Checks for table existence before querying details to prevent
+# "relation does not exist" errors and provide clearer output.
 # ==============================================================================
 
 set -Eeuo pipefail
 
-# ----- Defaults (can be overridden by env or CLI) -----------------------------
-DB_CONTAINER_NAME="${DB_CONTAINER_NAME:-medical-db-container}"
+# ----- Defaults (override via env or CLI) -------------------------------------
+DB_CONTAINER_NAME="${DB_CONTAINER_NAME:-db}"          # match docker-compose
 POSTGRES_USER="${POSTGRES_USER:-mcp_user}"
 POSTGRES_DB="${POSTGRES_DB:-medical_db}"
 DB_SCHEMA="${DB_SCHEMA:-public}"
 
-# Expected tables (space-separated; can override with --tables)
-EXPECTED_TABLES_DEFAULT="patients vitals conditions allergies medications drugs drug_interactions appointments tool_audit"
+# Full production set (space-separated)
+EXPECTED_TABLES_DEFAULT="\
+roles users user_roles user_settings auth_sessions password_resets \
+patients patient_users vitals conditions allergies medications \
+drugs drug_interactions appointments encounters encounter_notes \
+documents tool_audit \
+"
 
-# Flags
 EXACT_COUNTS=0
 QUIET=0
 
@@ -50,14 +42,12 @@ Options:
   -U, --user USER        Postgres user          (default: ${POSTGRES_USER})
   -d, --db DBNAME        Postgres database      (default: ${POSTGRES_DB})
   -s, --schema SCHEMA    Schema to inspect      (default: ${DB_SCHEMA})
-  -t, --tables "T1 T2"   Space-separated list of tables to detail
-                         (default: ${EXPECTED_TABLES_DEFAULT})
-  -x, --exact            Use exact row counts (slower on big tables)
+  -t, --tables "T1 T2"   Space-separated tables (default: all production tables)
+  -x, --exact            Exact row counts (slower)
   -q, --quiet            Less verbose output
   -h, --help             Show this help
 
-Environment overrides also supported:
-  DB_CONTAINER_NAME, POSTGRES_USER, POSTGRES_DB, DB_SCHEMA
+Env overrides supported: DB_CONTAINER_NAME, POSTGRES_USER, POSTGRES_DB, DB_SCHEMA
 EOF
 }
 
@@ -77,23 +67,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ----- Pre-flight checks ------------------------------------------------------
+# ----- Pre-flight -------------------------------------------------------------
 command -v docker >/dev/null 2>&1 || die "Docker is not installed or not in PATH."
 
 if ! docker ps --format '{{.Names}}' | grep -qx "${DB_CONTAINER_NAME}"; then
   die "Container '${DB_CONTAINER_NAME}' is not running. Start it with: make db-up"
 fi
 
-# Verify psql is available inside the container
-if ! docker exec -i "${DB_CONTAINER_NAME}" bash -lc 'command -v psql >/dev/null 2>&1'; then
-  die "psql is not available inside container '${DB_CONTAINER_NAME}'. Is this a Postgres image?"
+# Verify psql inside the container (busybox 'sh' is enough)
+if ! docker exec -i "${DB_CONTAINER_NAME}" sh -lc 'command -v psql >/dev/null 2>&1'; then
+  die "psql is not available inside '${DB_CONTAINER_NAME}'. Is this a Postgres image?"
 fi
 
 PSQL=(docker exec -i "${DB_CONTAINER_NAME}" psql -X -q -v ON_ERROR_STOP=1 -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -P pager=off)
 
 run_sql() {
   local sql="$1"
-  "${PSQL[@]}" -c "$sql"
+  # Add || true to prevent script exit on benign errors like "relation does not exist"
+  # This makes the main loop's existence check the primary control flow.
+  "${PSQL[@]}" -c "$sql" || true
 }
 
 title() { say ""; say "📌 $*"; hr; }
@@ -146,7 +138,7 @@ run_sql "SELECT t.typname AS enum_name,
          GROUP BY t.typname
          ORDER BY t.typname;"
 
-title "🧠 Views definitions (first 2, if present)"
+title "🧠 Key View Definitions"
 run_sql "SELECT viewname, pg_get_viewdef((quote_ident(schemaname)||'.'||quote_ident(viewname))::regclass, true) AS definition
          FROM pg_views
          WHERE schemaname='${DB_SCHEMA}'
@@ -157,9 +149,20 @@ run_sql "SELECT viewname, pg_get_viewdef((quote_ident(schemaname)||'.'||quote_id
 title "📋 Column details, indexes, constraints, sizes & row counts"
 IFS=' ' read -r -a TABLES <<< "${EXPECTED_TABLES}"
 for tbl in "${TABLES[@]}"; do
+  [[ -z "$tbl" ]] && continue
   say ""
   say "▶ ${DB_SCHEMA}.${tbl}"
   hr
+
+  # ✅ FIX: Check if table exists before proceeding
+  table_exists=$("${PSQL[@]}" -tA -c "SELECT 1 FROM information_schema.tables WHERE table_schema='${DB_SCHEMA}' AND table_name='${tbl}'")
+
+  if [[ "${table_exists}" != "1" ]]; then
+    say "⚠️  Table not found in schema '${DB_SCHEMA}'."
+    continue # Skip to the next table
+  fi
+
+  # --- If table exists, proceed with all the detail queries ---
 
   # Columns
   run_sql "
@@ -172,7 +175,7 @@ for tbl in "${TABLES[@]}"; do
     FROM information_schema.columns c
     WHERE c.table_schema='${DB_SCHEMA}' AND c.table_name='${tbl}'
     ORDER BY c.ordinal_position;
-  " || true
+  "
 
   # Indexes
   say "• Indexes"
@@ -181,7 +184,7 @@ for tbl in "${TABLES[@]}"; do
     FROM pg_indexes
     WHERE schemaname='${DB_SCHEMA}' AND tablename='${tbl}'
     ORDER BY indexname;
-  " || true
+  "
 
   # Constraints
   say "• Constraints"
@@ -201,27 +204,25 @@ for tbl in "${TABLES[@]}"; do
     JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
     WHERE nsp.nspname='${DB_SCHEMA}' AND rel.relname='${tbl}'
     ORDER BY con.conname;
-  " || true
+  "
 
-  # Size + row count
+  # Size + row count (now safe to run)
   if [[ "${EXACT_COUNTS}" -eq 1 ]]; then
     say "• Size & rows (exact)"
     run_sql "
       SELECT
-        '${tbl}' AS table_name,
         pg_size_pretty(pg_total_relation_size('${DB_SCHEMA}.${tbl}')) AS total_size,
         (SELECT COUNT(*)::bigint FROM ${DB_SCHEMA}.${tbl}) AS exact_rows;
-    " || true
+    "
   else
     say "• Size & rows (estimated)"
     run_sql "
       SELECT
-        '${tbl}' AS table_name,
         pg_size_pretty(pg_total_relation_size('${DB_SCHEMA}.${tbl}')) AS total_size,
         (SELECT reltuples::bigint FROM pg_class WHERE oid='${DB_SCHEMA}.${tbl}'::regclass) AS est_rows;
-    " || true
+    "
   fi
 done
 
 say ""
-say "✅ Done. If tables show columns, indexes, constraints, sizes and row estimates, your DB is healthy."
+say "✅ Done. DB schema looks good if the above sections populated correctly."

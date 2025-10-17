@@ -1,1 +1,1 @@
-# reserved for logging config, exporters, etc.
+# placeholder for future logging/metrics bootstrap

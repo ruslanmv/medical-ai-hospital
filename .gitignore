@@ -9,6 +9,7 @@ Thumbs.db
 # ----------------------------------------------------------------------------
 .env
 .env.*
+!.env.template
 !.env.example
 !frontend/.env.local.example
 !gateway/.env.example
@@ -80,3 +81,12 @@ db/dump.sql
 # ----------------------------------------------------------------------------
 .run/
 Makefile copy
+
+
+copy *
+copy *.*
+ copy *
+* copy *.*
+* copy *
+* copy.*
+ copy*
