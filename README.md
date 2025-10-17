@@ -48,98 +48,87 @@
 
 ```mermaid
 flowchart TD
-%% CSS classes
-classDef layer fill:#fff,stroke:#333,stroke-width:2px,color:#333;
-classDef fe fill:#f9f,stroke:#333,stroke-width:2px;
-classDef gw fill:#ccf,stroke:#333,stroke-width:2px;
-classDef db fill:#cfc,stroke:#333,stroke-width:2px;
-classDef mcp fill:#fcf,stroke:#333,stroke-width:2px;
+    %% --- Diagram Title ---
+    %% title Detailed Application Architecture
 
-%% ─────────────────────────────────────────────────────────────────────
-%% Frontend
-%% ─────────────────────────────────────────────────────────────────────
-subgraph FE["📱 Frontend"]
-direction TB
-R["/register/"]
-L["/login/"]
-D["/dashboard/"]
-P["/profile/"]
-C["/chat/"]
-end
-class FE layer; class R,L,D,P,C fe;
+    %% --- Style Definitions ---
+    classDef client fill:#D6EAF8,stroke:#3498DB,stroke-width:2px;
+    classDef gateway fill:#E8F8F5,stroke:#1ABC9C,stroke-width:2px;
+    classDef services fill:#FEF9E7,stroke:#F1C40F,stroke-width:2px;
+    classDef database fill:#FDEDEC,stroke:#E74C3C,stroke-width:2px;
+    classDef ai_engine fill:#F4ECF7,stroke:#8E44AD,stroke-width:2px;
 
-%% ─────────────────────────────────────────────────────────────────────
-%% Gateway API
-%% ─────────────────────────────────────────────────────────────────────
-subgraph GW["☁️ Gateway API"]
-direction TB
-A1["POST /auth/register"]
-A2["POST /auth/login"]
-A3["POST /auth/logout"]
-M1["GET/PUT /me"]
-M2["GET/PUT /me/patient"]
-CH1["POST /chat/send"]
-CH2["GET /chat/events (SSE)"]
-end
-class GW layer; class A1,A2,A3,M1,M2,CH1,CH2 gw;
+    %% --- Layer 1: Client Application ---
+    subgraph FE["📱 Client Application"]
+        direction LR
+        AuthViews["Authentication</br>(/login, /register)"]
+        ProfileViews["Patient Portal</br>(/dashboard, /profile)"]
+        ChatView["AI Symptom Chat</br>(/chat)"]
+    end
+    class FE client;
 
-%% ─────────────────────────────────────────────────────────────────────
-%% PostgreSQL
-%% ─────────────────────────────────────────────────────────────────────
-subgraph DB["🗄️ PostgreSQL"]
-direction TB
-U["users"]
-S["auth_sessions"]
-PU["patient_users"]
-PT["patients"]
-VT["vitals"]
-CD["conditions"]
-AL["allergies"]
-MD["medications"]
-AP["appointments"]
-end
-class DB layer; class U,S,PU,PT,VT,CD,AL,MD,AP db;
+    %% --- Layer 2: API Gateway ---
+    subgraph GW["☁️ API Gateway"]
+        direction TB
+        subgraph AuthEndpoints["Authentication Service"]
+            direction LR
+            A1["POST /auth/register"]
+            A2["POST /auth/login"]
+        end
+        subgraph ProfileEndpoints["Profile Service"]
+            direction LR
+            M1["GET/PUT /me"]
+            M2["GET/PUT /me/patient"]
+        end
+        subgraph ChatEndpoints["Chat Service"]
+            direction LR
+            CH1["POST /chat/send"]
+            CH2["GET /chat/events"]
+        end
+    end
+    class GW gateway;
 
-%% ─────────────────────────────────────────────────────────────────────
-%% MCP Server
-%% ─────────────────────────────────────────────────────────────────────
-subgraph MCP["🧠 MCP Server"]
-direction TB
-T1["triageSymptoms"]
-T2["getPatient*"]
-T3["calcClinicalScores"]
-T4["drug*"]
-end
-class MCP layer; class T1,T2,T3,T4 mcp;
+    %% --- Layer 3: Backend Services ---
+    subgraph Backend["⚙️ Backend Services"]
+        direction LR
+        subgraph MCP["🧠 MCP Server (AI Engine)"]
+            T1["triageSymptoms"]
+            T2["getPatientData"]
+            T3["calcClinicalScores"]
+        end
+        class MCP ai_engine;
 
-%% ─────────────────────────────────────────────────────────────────────
-%% Flows: Frontend → Gateway
-%% ─────────────────────────────────────────────────────────────────────
-R --> A1
-L --> A2
-D --> M1
-P --> M2
-C --> CH1
-C --> CH2
+        subgraph DB["🗄️ PostgreSQL Database"]
+            subgraph UserData["User & Auth Tables"]
+                direction TB
+                U["users"]
+                S["auth_sessions"]
+            end
+            subgraph PatientData["Patient Clinical Data"]
+                direction TB
+                PT["patients"]
+                VT["vitals"]
+                CD["conditions"]
+                MD["medications"]
+            end
+        end
+        class DB database;
+    end
+    class Backend services;
 
-%% ─────────────────────────────────────────────────────────────────────
-%% Gateway → DB (auth + profile) and Gateway → MCP (chat)
-%% ─────────────────────────────────────────────────────────────────────
-A1 --> U
-A2 --> S
-A3 --> S
-M1 --> U
-M2 --> PT
-M2 --> PU
-CH1 --> MCP
-CH2 --> MCP
+    %% --- Define Flows ---
+    %% Client -> Gateway
+    AuthViews -- "HTTPS" --> AuthEndpoints;
+    ProfileViews -- "HTTPS" --> ProfileEndpoints;
+    ChatView -- "HTTPS/SSE" --> ChatEndpoints;
 
-%% Gateway also reads/writes clinical tables
-M2 -. read/write .-> PT
-M2 -. read/write .-> CD
-M2 -. read/write .-> AL
-M2 -. read/write .-> MD
-M2 -. read/write .-> AP
+    %% Gateway -> Backend Services
+    AuthEndpoints -- "Manages" --> UserData;
+    ProfileEndpoints -- "Reads/Writes" --> PatientData;
+    ChatEndpoints -- "Processes symptoms via" --> MCP;
+
+    %% Internal Backend Flow
+    MCP -- "Retrieves data from" --> PatientData;
 ```
 
 **Data flow highlights**
