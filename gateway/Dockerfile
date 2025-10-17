@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=8080
 
-# Create non-root user for security
+# Security: non-root user
 RUN useradd -m appuser
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
  && rm -rf /var/lib/apt/lists/*
 
-# Python deps first for layer caching
+# Python deps (layer cache)
 COPY requirements.txt ./
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
@@ -25,5 +25,5 @@ COPY app ./app
 EXPOSE 8080
 USER appuser
 
-# Gunicorn with Uvicorn worker (production)
+# Gunicorn with Uvicorn workers (production)
 CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-w", "2", "-b", "0.0.0.0:8080", "app.main:app"]

@@ -1,43 +1,56 @@
-
-
-# ==============================
-# docker-compose.yml (UPDATED SNIPPET)
-# ==============================
-# Key changes:
-#  1) gateway.depends_on removed so `make gw` doesn't health-gate on db.
-#  2) Keep db ports mapping for host access, but you can override with DB_PORT=5433
-#     or remove the mapping entirely to avoid any host port conflicts.
+# medical-ai-hospital/docker-compose.yml
+# Production-friendly compose for: Postgres + MCP + Gateway (FastAPI) + Frontend (Next.js)
+# - No top-level `version` key.
+# - Healthchecks for each service.
+# - Secrets via `.env` (copy from .env.template and fill in).
+# - Log rotation and restart policies.
+# - Isolated networks for backend/edge tiers.
 
 services:
   db:
     image: postgres:15
     container_name: db
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: mcp_user
-      POSTGRES_PASSWORD: mcp_password
-      POSTGRES_DB: medical_db
+    env_file:
+      - .env
+    stop_signal: SIGINT
     ports:
-      - "${DB_PORT:-5432}:5432"              # change DB_PORT to avoid conflicts on host
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./db/10_init.sql:/docker-entrypoint-initdb.d/10_init.sql:ro
       - ./db/20_seed.sql:/docker-entrypoint-initdb.d/20_seed.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mcp_user -d medical_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mcp_user} -d ${POSTGRES_DB:-medical_db}"]
       interval: 5s
-      timeout: 3s
-      retries: 30
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
 
   mcp:
     image: ghcr.io/ruslanmv/medical-mcp-toolkit:latest
     container_name: mcp
     restart: unless-stopped
-    environment:
-      BEARER_TOKEN: ${MCP_BEARER_TOKEN:-dev-token}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://mcp_user:mcp_password@db:5432/medical_db}
-      UVICORN_LOG_LEVEL: ${UVICORN_LOG_LEVEL:-info}
-      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-INFO}
+    read_only: true
+    tmpfs:
+      - /tmp
+    env_file:
+      - .env
     ports:
       - "${MCP_PORT:-9090}:8080"
     depends_on:
@@ -46,9 +59,24 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
-      timeout: 3s
-      retries: 20
-      start_period: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
 
   gateway:
     build:
@@ -56,25 +84,40 @@ services:
       dockerfile: Dockerfile
     container_name: gateway
     restart: unless-stopped
-    environment:
-      DATABASE_URL: postgresql://mcp_user:mcp_password@db:5432/medical_db
-      ALLOWED_ORIGINS: http://localhost:3000
-      ALLOW_CREDENTIALS: "true"
-      SESSION_COOKIE_NAME: sid
-      SESSION_TTL_SECONDS: 2592000
-      SESSION_SECURE_COOKIES: "false"
-      SESSION_SAMESITE: lax
-      COOKIE_SECRET: change-me-please-32B-minimum
-      MCP_BASE_URL: http://mcp:8080
-      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-dev-token}
+    read_only: true
+    tmpfs:
+      - /tmp
+    env_file:
+      - .env
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
-    # IMPORTANT: no depends_on here to avoid health gating; `make gw` uses --no-deps.
+    depends_on:
+      db:
+        condition: service_healthy
+      mcp:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
-      timeout: 3s
-      retries: 20
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - backend
+      - edge
 
   frontend:
     build:
@@ -82,14 +125,44 @@ services:
       dockerfile: Dockerfile
     container_name: frontend
     restart: unless-stopped
-    environment:
-      NEXT_PUBLIC_API_BASE: http://localhost:${GATEWAY_PORT:-8080}
-      NEXT_PUBLIC_APP_NAME: Medical AI Portal
+    stop_grace_period: 30s
+    env_file:
+      - .env
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       gateway:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - edge
 
 volumes:
   db_data:
+    name: medical_ai_db_data
+
+networks:
+  backend:
+    driver: bridge
+    name: medical_ai_backend
+  edge:
+    driver: bridge
+    name: medical_ai_edge

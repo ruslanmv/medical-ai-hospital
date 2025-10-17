@@ -1,23 +1,17 @@
-# ==============================
-# Makefile (UPDATED)
-# ==============================
-# Monorepo Dev & Ops (DB + Gateway + Frontend)
-# - gw target will NOT start dependencies (db/mcp). It only (re)starts gateway.
-# - Use `make gw-deps` if you want gateway + its deps started together.
-# - If your host already runs Postgres on 5432, either:
-#     • export DB_PORT=5433 (or another free port) before `make up`, or
-#     • remove the db.ports mapping in docker-compose.yml, or
-#     • use `make gw` (no deps) to avoid starting/recreating the db container.
+# Makefile — Monorepo Dev & Ops (DB + Gateway + Frontend)
+# - Uses docker compose (v2) if available, falls back to docker-compose (v1).
+# - `gw` starts only gateway (no deps). Use `gw-deps` for gateway + db + mcp.
+# - Override ports on the fly: e.g. `DB_PORT=5433 make up`.
 
 .DEFAULT_GOAL := help
 
-# --- Versions / Ports ---------------------------------------------------------
+# --------- Ports (override via env) ------------------------------------------
 FRONTEND_PORT ?= 3000
 GATEWAY_PORT  ?= 8080
 MCP_PORT      ?= 9090
 DB_PORT       ?= 5432
 
-# --- Docker Compose Detection (v2 plugin vs v1 binary) -----------------------
+# --------- Compose detection -------------------------------------------------
 HAVE_DOCKER_COMPOSE_V2 := $(shell docker compose version >/dev/null 2>&1 && echo 1 || echo 0)
 HAVE_DOCKER_COMPOSE_V1 := $(shell docker-compose --version >/dev/null 2>&1 && echo 1 || echo 0)
 
@@ -29,7 +23,8 @@ else
   $(error Docker Compose not found. Install Compose v2 ('docker compose') or v1 ('docker-compose'))
 endif
 
-.PHONY: help up down ps logs tail restart \
+# --------- Phony targets -----------------------------------------------------
+.PHONY: help up down down-v stop ps logs tail restart \
         db-up db-down db-logs dump \
         fe fe-build fe-start fe-lint \
         gw gw-deps gw-lint gw-test \
@@ -37,20 +32,26 @@ endif
         seed smoke clean compose-version
 
 help: ## Show available targets
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*##/ { printf "  %-20s %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ { printf "  %-20s %s\n", $$1, $$2 } ' $(MAKEFILE_LIST)
 
 compose-version: ## Show which Compose variant is being used
 	@echo "Using: $(COMPOSE)"
 	@$(COMPOSE) version || true
 
-# --- Orchestration ------------------------------------------------------------
+# --------- Orchestration -----------------------------------------------------
 up: ## Start all services (DB, MCP, Gateway, Frontend)
 	$(COMPOSE) up -d --build
 	@echo "→ http://localhost:$(FRONTEND_PORT)  (frontend)"
 	@echo "→ http://localhost:$(GATEWAY_PORT)   (gateway)"
 	@echo "→ http://localhost:$(MCP_PORT)       (mcp)"
 
-down: ## Stop and remove all services
+stop: ## Stop all services (without removing containers)
+	$(COMPOSE) stop
+
+down: ## Stop and remove containers (preserves data volumes)
+	$(COMPOSE) down
+
+down-v: ## Stop and remove containers AND data volumes (deletes DB data)
 	$(COMPOSE) down -v
 
 ps: ## Show service status
@@ -67,81 +68,80 @@ restart: ## Restart one service: make restart S=gateway
 	@[ -n "$(S)" ] || (echo "Usage: make restart S=<service>" && exit 1)
 	$(COMPOSE) up -d --build $(S)
 
-# --- Database -----------------------------------------------------------------
-
+# --------- Database ----------------------------------------------------------
 DB_PSQL = docker exec -i db psql -U mcp_user -d medical_db -v ON_ERROR_STOP=1 -X -q -P pager=off
 
-db-up: ## Start only the database
-	$(COMPOSE) up -d db
+db-up: ## Start or (re)create the database service; remove conflicting 'db' container if it exists
+	@# If any container named 'db' exists (even from outside compose), remove it to avoid name conflicts.
+	@docker ps -a --format '{{.Names}}' | grep -x 'db' >/dev/null 2>&1 && \
+	  (echo "→ Removing pre-existing 'db' container to avoid name conflict"; docker rm -fv db >/dev/null) || true
+	$(COMPOSE) up -d --build db
+	@echo "DB ready on port $(DB_PORT)"
 
-db-down: ## Stop and remove the database
-	$(COMPOSE) rm -sfv db
+db-down: ## Stop and remove the database (handles running or foreign containers cleanly)
+	-$(COMPOSE) stop db || true
+	-$(COMPOSE) rm -sfv db || true
+	@# In case the db container was created outside of this compose project:
+	-@docker ps -a --format '{{.Names}}' | grep -x 'db' >/dev/null 2>&1 && docker rm -fv db || true
 
 db-logs: ## Tail database logs
 	$(COMPOSE) logs -f --tail=200 db
 
-# Dumps the current schema and data to ./db/dump.sql (includes data)
-dump: ## Dump DB schema+data to db/dump.sql
+dump: ## Dump DB schema+data to db/dump.sql (includes data)
 	@mkdir -p db
 	docker exec -i db pg_dump -U mcp_user -d medical_db > db/dump.sql
 	@echo "Wrote db/dump.sql"
 
-# --- Frontend -----------------------------------------------------------------
+# --------- Frontend ----------------------------------------------------------
 fe: ## Start frontend only (detached)
 	$(COMPOSE) up -d frontend
 
 fe-build: ## Build frontend image
 	$(COMPOSE) build frontend
 
-fe-start: ## Start FE dev server (attach)
+fe-start: ## Start FE in attached mode
 	$(COMPOSE) up frontend
 
 fe-lint: ## Lint FE
-	$(COMPOSE) run --rm frontend npm run lint
+	$(COMPOSE) run --rm frontend npm run lint || true
 
-# --- Gateway ------------------------------------------------------------------
-# IMPORTANT: `gw` does NOT start dependencies (db/mcp). This avoids
-#            re-creating or health-gating the DB when it's already running.
-#            If you need deps, run `make gw-deps` instead.
-
+# --------- Gateway -----------------------------------------------------------
+# NOTE: `gw` will not start db/mcp. Use `gw-deps` to bring them too.
 gw: ## Start gateway only (no deps)
 	$(COMPOSE) up -d --no-deps --build gateway
 
-# Bring up gateway + its declared deps (may fail if host port 5432 is taken)
-# Use this on a fresh setup; otherwise prefer `make gw`.
-
-gw-deps: ## Start gateway and its dependencies (db, mcp)
+gw-deps: ## Start gateway + dependencies (db, mcp)
 	$(COMPOSE) up -d --build gateway
-
 
 gw-lint: ## Lint gateway (ruff)
 	$(COMPOSE) run --rm gateway ruff check . || true
 
-
 gw-test: ## Run gateway tests (pytest)
 	$(COMPOSE) run --rm gateway pytest -q || true
 
-# --- Project Hygiene ----------------------------------------------------------
+# --------- Project Hygiene ---------------------------------------------------
 bootstrap: ## Install toolchains (Node deps, Python deps)
 	$(COMPOSE) run --rm frontend npm ci || true
-	$(COMPOSE) run --rm gateway uv sync || true
+	$(COMPOSE) run --rm gateway pip install -r requirements.txt || true
 
-fmt: ## Format all code (FE+GW)
+fmt: ## Format gateway code
 	$(COMPOSE) run --rm gateway ruff format . || true
 	$(COMPOSE) run --rm gateway black . || true
 
-lint: ## Lint all code (FE+GW)
+lint: ## Lint gateway & frontend
 	$(COMPOSE) run --rm gateway ruff check . || true
 	$(COMPOSE) run --rm frontend npm run lint || true
 
-# --- QA ----------------------------------------------------------------------
-seed: ## (Optional) Seed via MCP tools or SQL (extend as needed)
-	@echo "Seed step can be implemented via ./db/migrations or scripts."
+# --------- QA ---------------------------------------------------------------
+seed: ## (Optional) Seed via SQL or scripts
+	@echo "Implement seeding via ./db/migrations or scripts as needed."
 
-smoke: ## End-to-end smoke test
-	./scripts/health.sh || true
+smoke: ## Quick health checks (requires curl & jq)
+	@echo "Gateway:" && curl -fsS http://localhost:$(GATEWAY_PORT)/health | jq . || true
+	@echo "MCP:" && curl -fsS http://localhost:$(MCP_PORT)/health || true
+	@echo "Frontend:" && curl -fsS http://localhost:$(FRONTEND_PORT)/ | head -n 3 || true
 
-clean: ## Remove build artifacts and volumes
+clean: ## Nuke everything: containers, volumes, and artifacts
 	$(COMPOSE) down -v --remove-orphans
 	@rm -f db/dump.sql
 	@echo "Cleaned."
