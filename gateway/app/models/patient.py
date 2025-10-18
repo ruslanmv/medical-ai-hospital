@@ -1,14 +1,22 @@
+# gateway/app/models/patient.py
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr
-from typing import Optional, Any
+from datetime import date
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel, EmailStr, Field
+
+
+Sex = Literal["male", "female", "intersex", "other", "unknown"]
+
 
 class PatientUpdateIn(BaseModel):
+    """Partial update payload for a patient's own demographics/contact info."""
     first_name: Optional[str] = None
     middle_name: Optional[str] = None
     last_name: Optional[str] = None
-    date_of_birth: Optional[str] = None  # ISO date
-    sex: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    sex: Optional[Sex] = None
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
     address_line1: Optional[str] = None
@@ -16,9 +24,11 @@ class PatientUpdateIn(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     postal_code: Optional[str] = None
-    country_code: Optional[str] = None
+    country_code: Optional[str] = Field(default=None, min_length=2, max_length=2)
+
 
 class PatientProfileOut(BaseModel):
+    """Read model matching view v_patient_profile (PII + snapshot)."""
     patient_id: str
     external_key: Optional[str] = None
     mrn: Optional[str] = None
@@ -27,8 +37,8 @@ class PatientProfileOut(BaseModel):
     middle_name: Optional[str] = None
     last_name: Optional[str] = None
     suffix: Optional[str] = None
-    date_of_birth: Optional[str] = None
-    sex: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    sex: Optional[Sex] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     address_line1: Optional[str] = None
