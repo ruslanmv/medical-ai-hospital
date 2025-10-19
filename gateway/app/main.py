@@ -1,8 +1,10 @@
+# medical-ai-hospital/gateway/app/main.py
 from __future__ import annotations
 
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from .config import settings
 from .db import init_pool, close_pool
 from .telemetry.middleware import RequestIDMiddleware
@@ -12,10 +14,11 @@ from .chat.routes import router as chat_router
 
 log = logging.getLogger("gateway")
 
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Hospital Gateway API", version="1.0.0")
 
-    # CORS (CSV env -> list)
+    # CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -23,6 +26,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Request ID for tracing
     app.add_middleware(RequestIDMiddleware)
 
     @app.on_event("startup")
