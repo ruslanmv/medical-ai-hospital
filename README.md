@@ -13,6 +13,8 @@
 
 > A production-ready hospital portal where patients can **register/login**, chat with an AI intake assistant (Watsonx Orchestrate / MCP), and **manage their medical profile**. The stack wires a **Next.js** frontend to a **FastAPI** gateway that talks to **Postgres** and the external **medical-mcp-toolkit** server (HTTP + SSE).
 
+![alt text](<Screenshot 2025-10-20 at 00.28.55.png>)
+
 ---
 
 ## Table of Contents
@@ -21,7 +23,6 @@
   - [Table of Contents](#table-of-contents)
   - [🧠 System Architecture](#-system-architecture)
   - [✨ Features](#-features)
-  - [📦 Monorepo Layout](#-monorepo-layout)
   - [🧰 Tech Stack](#-tech-stack)
   - [📋 Prerequisites](#-prerequisites)
   - [🚀 Quickstart](#-quickstart)
@@ -146,95 +147,6 @@ flowchart TD
 * **AI intake chat** with SSE streaming through the gateway (no MCP token in the browser)
 * **PostgreSQL** schema optimized for medical data (vitals, meds, conditions, appointments)
 * Production-minded: CORS allowlist, HttpOnly cookies, request-id middleware, structured logging
-
----
-
-## 📦 Monorepo Layout
-
-```
-medical-ai-hospital-portal/
-├── LICENSE
-├── Makefile
-├── README.md
-├── docker-compose.yml
-├── docs/
-│   ├── INSTALLATION.md
-│   └── API.md
-├── scripts/
-│   ├── create_db.sh
-│   ├── db_schema_check.sh
-│   └── health.sh
-├── db/
-│   ├── 01_init.sql               # copy of medical-mcp-toolkit/db/10_init.sql
-│   └── migrations/               # future Alembic migrations
-├── mcp/                          # external repo (submodule): medical-mcp-toolkit
-│   └── …                         # https://github.com/ruslanmv/medical-mcp-toolkit
-├── gateway/
-│   ├── .env.example
-│   ├── requirements.txt
-│   └── app/
-│       ├── __init__.py
-│       ├── main.py
-│       ├── deps.py
-│       ├── config.py
-│       ├── db.py
-│       ├── telemetry/
-│       │   ├── __init__.py
-│       │   └── middleware.py
-│       ├── auth/
-│       │   ├── routes.py
-│       │   ├── hashing.py
-│       │   └── sessions.py
-│       ├── me/
-│       │   └── routes.py
-│       ├── chat/
-│       │   ├── routes.py
-│       │   └── mcp_client.py
-│       ├── models/
-│       │   ├── auth.py
-│       │   ├── me.py
-│       │   └── patient.py
-│       └── repos/
-│           ├── users.py
-│           ├── patients.py
-│           ├── allergies.py
-│           ├── medications.py
-│           └── vitals.py
-└── frontend/
-    ├── .env.local.example
-    ├── package.json
-    ├── next.config.mjs
-    ├── tsconfig.json
-    ├── postcss.config.mjs
-    ├── tailwind.config.ts
-    ├── public/
-    │   └── favicon.ico
-    ├── styles/
-    │   └── globals.css
-    ├── app/
-    │   ├── layout.tsx
-    │   ├── page.tsx
-    │   ├── (auth)/
-    │   │   ├── login/page.tsx
-    │   │   └── register/page.tsx
-    │   ├── dashboard/page.tsx
-    │   ├── profile/page.tsx
-    │   └── chat/page.tsx
-    ├── components/
-    │   ├── Navbar.tsx
-    │   ├── AuthForm.tsx
-    │   ├── ProfileForm.tsx
-    │   ├── ChatPanel.tsx
-    │   └── Loading.tsx
-    ├── hooks/
-    │   ├── useAuth.ts
-    │   ├── useSSE.ts
-    │   └── usePatientProfile.ts
-    └── lib/
-        ├── api.ts
-        ├── auth.ts
-        └── sse.ts
-```
 
 ---
 
