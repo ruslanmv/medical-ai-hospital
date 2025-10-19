@@ -3,20 +3,21 @@ from __future__ import annotations
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, NamedTuple
+from typing import NamedTuple, Optional
 
 from fastapi import Request, Response
 
 from ..config import settings
 from ..repos import users as user_repo
 
-
 COOKIE_NAME = settings.session_cookie_name
+
 
 class SessionData(NamedTuple):
     session_id: str
     user_id: str
     expires_at: datetime
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -57,7 +58,9 @@ async def create_session(*, user_id: str, request: Request, response: Response) 
         samesite=settings.session_samesite,
     )
 
-async def get_session(request: Request) -> SessionData | None:
+
+async def read_session(request: Request) -> SessionData | None:
+    """Read session data from the request cookie."""
     raw_token = request.cookies.get(COOKIE_NAME)
     if not raw_token:
         return None
@@ -75,6 +78,7 @@ async def get_session(request: Request) -> SessionData | None:
 
 
 async def revoke_session(request: Request, response: Response) -> None:
+    """Revoke the session by marking it in the DB and clearing the cookie."""
     raw_token = request.cookies.get(COOKIE_NAME)
     if raw_token:
         token_hash = _hash_token(raw_token)
