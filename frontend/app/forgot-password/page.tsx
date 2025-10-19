@@ -5,9 +5,9 @@ import Link from 'next/link';
 
 const API = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8080';
 
-async function api<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
+async function api<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API}${path}`, {
-    method,
+    method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -17,16 +17,13 @@ async function api<T>(path: string, body: unknown, method = 'POST'): Promise<T> 
   return text ? (JSON.parse(text) as T) : ({} as T);
 }
 
-export default function RegisterPage() {
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
-  const [pw, setPw] = useState('');
-  const [confirm, setConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const passwordsMatch = pw && confirm && pw === confirm;
-  const canSubmit = !submitting && !!email && !!pw && !!confirm && passwordsMatch;
+  const canSubmit = !submitting && !!email;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,13 +33,13 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     try {
-      await api('/auth/register', { email, password: pw });
-      setSuccess('Account created successfully. You can now log in.');
-      setEmail('');
-      setPw('');
-      setConfirm('');
+      // Backend always returns 200 to avoid user enumeration
+      await api('/auth/forgot-password', { email });
+      setSuccess(
+        'If an account exists for that email, we’ve sent a reset link. Please check your inbox.'
+      );
     } catch (e: any) {
-      setError(e?.message || 'Failed to register.');
+      setError(e?.message || 'Unable to process your request right now.');
     } finally {
       setSubmitting(false);
     }
@@ -50,7 +47,7 @@ export default function RegisterPage() {
 
   return (
     <div className="mx-auto max-w-md px-4 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Create an Account</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Forgot Password</h1>
 
       <form onSubmit={onSubmit} className="mt-6 space-y-6" noValidate>
         {error && (
@@ -60,7 +57,7 @@ export default function RegisterPage() {
         )}
         {success && (
           <div role="status" className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-            {success} <Link className="underline" href="/login">Go to login</Link>
+            {success}
           </div>
         )}
 
@@ -73,27 +70,6 @@ export default function RegisterPage() {
           autoComplete="email"
           required
         />
-        <Field
-          label="Password"
-          type="password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          placeholder="Enter a strong password"
-          autoComplete="new-password"
-          required
-        />
-        <Field
-          label="Confirm password"
-          type="password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          placeholder="Re-enter password"
-          autoComplete="new-password"
-          required
-        />
-        {pw && confirm && !passwordsMatch && (
-          <p className="text-sm text-red-600">Passwords do not match.</p>
-        )}
 
         <div className="flex items-center gap-3">
           <button
@@ -103,10 +79,10 @@ export default function RegisterPage() {
               !canSubmit ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'
             } transition`}
           >
-            {submitting ? 'Creating…' : 'Create Account'}
+            {submitting ? 'Sending…' : 'Send Reset Link'}
           </button>
           <Link className="text-sm text-gray-600 underline" href="/login">
-            Already have an account? Log in
+            Back to login
           </Link>
         </div>
       </form>
